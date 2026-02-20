@@ -1,10 +1,11 @@
 import gdown
 import os
+import cv2
+import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import load_model
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File
 
-# 1. Initialize the FastAPI app - THIS IS THE MISSING PART
 app = FastAPI()
 
 # Force TensorFlow to use ONLY the CPU to save RAM
@@ -16,7 +17,6 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 B0_PATH = os.path.join(MODEL_DIR, "fracture_b0.keras")
 B4_PATH = os.path.join(MODEL_DIR, "fracture_b4.keras")
 
-# Google Drive IDs
 B0_ID = "1-XTjfnayM6lh2c1cYqSIqk0oYdqy7XTy"
 B4_ID = "1Tn7mbDg9AsplfDSnBWVuaIXGVU7JZSI5"
 
@@ -28,7 +28,6 @@ def download_models():
         print("⬇ Downloading B4 model...")
         gdown.download(f"https://drive.google.com/uc?id={B4_ID}", B4_PATH, quiet=False)
 
-# Global variables for lazy loading
 model_b0 = None
 model_b4 = None
 
@@ -46,15 +45,31 @@ def get_model(model_type="b0"):
             model_b4 = load_model(B4_PATH, compile=False)
         return model_b4
 
-# 2. Add a basic health check route
 @app.get("/")
 def home():
     return {"status": "Model service is running. Use /predict for analysis."}
 
-# 3. Add your prediction route
 @app.post("/predict")
-async def predict(data: dict):
-    # This ensures models only load into RAM when a request is made
+async def predict(image: UploadFile = File(...)):
+    # 1. Lazy load the model
     model = get_model("b0") 
-    # Add your image processing and prediction logic here
-    return {"message": "Prediction endpoint reached"}
+    
+    # 2. Read the uploaded image bytes
+    contents = await image.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+    # 3. Preprocess (Resize to 224x224 for EfficientNetB0)
+    img = cv2.resize(img, (224, 224))
+    img = img / 255.0  
+    img = np.expand_dims(img, axis=0)
+
+    # 4. Predict
+    prediction = model.predict(img)
+    score = float(prediction[0][0])
+    result = "Fracture Detected" if score > 0.5 else "No Fracture"
+
+    return {
+        "prediction": result,
+        "confidence": round(score, 4)
+    }
