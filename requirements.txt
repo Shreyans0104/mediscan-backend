@@ -5,4 +5,3 @@ opencv-python-headless
 tensorflow
 python-multipart
 gdown
-python-3.10.13
