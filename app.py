@@ -3,14 +3,14 @@ import os
 import cv2
 import numpy as np
 import tensorflow as tf
-# Important: Keras 3 compatibility for EfficientNet
-import keras 
+import keras
 from tensorflow.keras.models import load_model
+from tensorflow.keras.applications.efficientnet import preprocess_input
 from fastapi import FastAPI, UploadFile, File
 
 app = FastAPI()
 
-# Force CPU only and reduce logging to save a bit of memory
+# Reduce TensorFlow logs & force CPU
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 tf.config.set_visible_devices([], 'GPU')
 
@@ -20,12 +20,19 @@ os.makedirs(MODEL_DIR, exist_ok=True)
 B0_PATH = os.path.join(MODEL_DIR, "fracture_b0.keras")
 B0_ID = "1-XTjfnayM6lh2c1cYqSIqk0oYdqy7XTy"
 
+# ---------------- DOWNLOAD MODEL ----------------
+
 def download_models():
     if not os.path.exists(B0_PATH):
         print("⬇ Downloading B0 model...")
-        gdown.download(f"https://drive.google.com/uc?id={B0_ID}", B0_PATH, quiet=False)
+        gdown.download(
+            f"https://drive.google.com/uc?id={B0_ID}",
+            B0_PATH,
+            quiet=False
+        )
 
-# Global variable for the single supported model
+# ---------------- LOAD MODEL ----------------
+
 model_b0 = None
 
 def get_model():
@@ -33,35 +40,62 @@ def get_model():
     download_models()
     if model_b0 is None:
         print("🧠 Loading B0 model...")
-        # compile=False is critical to save RAM (skips optimizer loading)
         model_b0 = load_model(B0_PATH, compile=False)
     return model_b0
 
+# ---------------- PREPROCESS ----------------
+
+def preprocess_image(img, target_size=(380, 380)):
+
+    # Convert grayscale → RGB
+    if len(img.shape) == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+    else:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+    # Resize to model input size
+    img = cv2.resize(img, target_size)
+
+    # Convert to float
+    img = img.astype("float32")
+
+    # EfficientNet preprocessing
+    img = preprocess_input(img)
+
+    # Add batch dimension
+    img = np.expand_dims(img, axis=0)
+
+    return img
+
+# ---------------- ROUTES ----------------
+
 @app.get("/")
 def home():
-    return {"status": "Service Live", "supported_model": "EfficientNetB0"}
+    return {
+        "status": "Service Live",
+        "supported_model": "EfficientNetB0"
+    }
 
 @app.post("/predict")
 async def predict(image: UploadFile = File(...)):
-    # 1. Load B0 model (B4 is disabled to save RAM)
-    model = get_model() 
-    
-    # 2. Read and decode image
+
+    model = get_model()
+
     contents = await image.read()
     nparr = np.frombuffer(contents, np.uint8)
+
     img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-    # 3. Preprocess
-    # Ensure resize matches the input shape of your B0 model (usually 224 or 380)
-    img = cv2.resize(img, (224, 224)) 
-    img = img.astype('float32') / 255.0  
-    img = np.expand_dims(img, axis=0)
+    if img is None:
+        return {"error": "Invalid image"}
 
-    # 4. Predict
+    # ⭐ USE CORRECT PREPROCESSING
+    img = preprocess_image(img)
+
     prediction = model.predict(img)
-    score = float(prediction[0][0])
-    
-    # Adjust threshold as per your training
+
+    score = float(prediction.flatten()[0])
+
     result = "Fracture Detected" if score > 0.5 else "No Fracture"
 
     return {
