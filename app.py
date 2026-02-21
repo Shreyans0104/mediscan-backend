@@ -1,9 +1,10 @@
-import gdown
 import os
 import cv2
+import gdown
 import numpy as np
 import tensorflow as tf
 import keras
+
 from tensorflow.keras.models import load_model
 from fastapi import FastAPI, UploadFile, File
 
@@ -11,12 +12,15 @@ from utils.preprocess import preprocess_image
 
 app = FastAPI()
 
-# Reduce TensorFlow logs & force CPU
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-tf.config.set_visible_devices([], 'GPU')
+# -------------------------------------------------
+# ⚙️ Reduce logs & force CPU (important for Render)
+# -------------------------------------------------
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+tf.config.set_visible_devices([], "GPU")
 
 # -------------------------------------------------
-# 📦 MODEL SETTINGS
+# 📦 MODEL SETTINGS (B0 ONLY)
 # -------------------------------------------------
 
 MODEL_DIR = "models"
@@ -26,7 +30,7 @@ B0_PATH = os.path.join(MODEL_DIR, "fracture_b0.keras")
 B0_ID = "1-XTjfnayM6lh2c1cYqSIqk0oYdqy7XTy"
 
 # -------------------------------------------------
-# ⬇ DOWNLOAD MODEL
+# ⬇ Download model from Google Drive
 # -------------------------------------------------
 
 def download_models():
@@ -39,13 +43,14 @@ def download_models():
         )
 
 # -------------------------------------------------
-# 🧠 LOAD MODEL (cached)
+# 🧠 Load model once (cached)
 # -------------------------------------------------
 
 model_b0 = None
 
 def get_model():
     global model_b0
+
     download_models()
 
     if model_b0 is None:
@@ -62,8 +67,19 @@ def get_model():
 def home():
     return {
         "status": "Service Live",
-        "supported_model": "EfficientNetB0"
+        "model": "EfficientNet-B0"
     }
+
+# -------------------------------------------------
+# 🏷️ MULTICLASS LABELS (EDIT IF NEEDED)
+# -------------------------------------------------
+
+CLASS_NAMES = [
+    "Hairline Fracture",
+    "Comminuted Fracture",
+    "Displaced Fracture",
+    "Fracture Dislocation"
+]
 
 # -------------------------------------------------
 # 🔮 PREDICTION ENDPOINT
@@ -74,7 +90,7 @@ async def predict(image: UploadFile = File(...)):
 
     model = get_model()
 
-    # Read image
+    # Read uploaded image
     contents = await image.read()
     nparr = np.frombuffer(contents, np.uint8)
 
@@ -83,17 +99,19 @@ async def predict(image: UploadFile = File(...)):
     if img is None:
         return {"error": "Invalid image"}
 
-    # ✅ USE CORRECT PREPROCESSING
+    # ✅ Correct preprocessing for EfficientNet
     img = preprocess_image(img)
 
     # Predict
-    prediction = model.predict(img)
+    prediction = model.predict(img)[0]
 
-    score = float(prediction.flatten()[0])
+    # Multiclass handling
+    class_index = int(np.argmax(prediction))
+    confidence = float(prediction[class_index])
 
-    result = "Fracture Detected" if score > 0.5 else "No Fracture"
+    result = CLASS_NAMES[class_index]
 
     return {
         "prediction": result,
-        "confidence": round(score, 4)
+        "confidence": round(confidence, 4)
     }
