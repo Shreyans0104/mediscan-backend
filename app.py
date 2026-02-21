@@ -75,10 +75,13 @@ def home():
 # -------------------------------------------------
 
 CLASS_NAMES = [
-    "Hairline Fracture",
-    "Comminuted Fracture",
-    "Displaced Fracture",
-    "Fracture Dislocation"
+    "Avulsion",
+    "Comminuted",
+    "Compression Crush",
+    "Fracture Dislocation",
+    "Greenstick",
+    "Hairline",
+    "Impacted",
 ]
 
 # -------------------------------------------------
